@@ -23,16 +23,21 @@
   const hours = Array.from({ length: 25 }, (_, i) => i + 3);
   const gridLines = Array.from({ length: 24 * 4 }, (_, i) => DAY_START + i * 15);
 
+  const PRESET_COLORS = [
+    '#A6B5A5', '#A8B8C8', '#C8A8A8', '#C8C0A0',
+    '#B0A8C8', '#A8C0B8', '#C8B0A0', '#B8B8A8',
+  ];
+
   // 列ごとに独立した重なり検出
   const layoutTasks = $derived(() => {
     const result = [];
     for (const side of cols) {
       const sideTasks = [...tasks].filter(t => t.col === side).sort((a, b) => a.start - b.start);
-      const cols = [];
+      const subcols = [];
       const withSubCol = sideTasks.map(task => {
-        let subCol = cols.findIndex(end => end <= task.start);
-        if (subCol === -1) subCol = cols.length;
-        cols[subCol] = task.end;
+        let subCol = subcols.findIndex(end => end <= task.start);
+        if (subCol === -1) subCol = subcols.length;
+        subcols[subCol] = task.end;
         return { ...task, subCol };
       });
       const final = withSubCol.map(task => {
@@ -45,40 +50,66 @@
     return result;
   });
 
+  // ストックグループ
+  let stockGroups = $state([
+    { id: 1, name: 'ストック', color: '#A6B5A5' },
+  ]);
+  let nextGroupId = $state(2);
+
   let stock = $state([]);
+
   let tasks = $state([
-    { id:  1, title: '睡眠',   start:  180, end:  480, col: 0 },
-    { id:  2, title: '朝食',   start:  480, end:  540, col: 0 },
-    { id:  3, title: '開発',   start:  540, end:  780, col: 0 },
-    { id:  4, title: '1コマ',  start:  540, end:  630, col: 1 },
-    { id:  5, title: 'MTG',    start:  630, end:  660, col: 1 },
-    { id:  6, title: '2コマ',  start:  690, end:  780, col: 1 },
-    { id:  7, title: '昼食',   start:  780, end:  840, col: 0 },
-    { id:  8, title: '開発',   start:  840, end: 1080, col: 0 },
-    { id:  9, title: '3コマ',  start:  840, end:  930, col: 1 },
-    { id: 10, title: 'MTG',    start:  930, end:  960, col: 1 },
-    { id: 11, title: '4コマ',  start:  990, end: 1080, col: 1 },
-    { id: 12, title: '料理',   start: 1080, end: 1140, col: 0 },
-    { id: 13, title: '夕食',   start: 1140, end: 1200, col: 0 },
-    { id: 14, title: 'お風呂', start: 1200, end: 1260, col: 0 },
-    { id: 15, title: '5コマ',  start: 1260, end: 1350, col: 1 },
-    { id: 16, title: '睡眠',   start: 1380, end: 1620, col: 0 },
+    { id:  1, title: '睡眠',   start:  180, end:  480, col: 0, groupId: 1 },
+    { id:  2, title: '朝食',   start:  480, end:  540, col: 0, groupId: 1 },
+    { id:  3, title: '開発',   start:  540, end:  780, col: 0, groupId: 1 },
+    { id:  4, title: '1コマ',  start:  540, end:  630, col: 0, groupId: 1 },
+    { id:  5, title: 'MTG',    start:  630, end:  660, col: 0, groupId: 1 },
+    { id:  6, title: '2コマ',  start:  690, end:  780, col: 0, groupId: 1 },
+    { id:  7, title: '昼食',   start:  780, end:  840, col: 0, groupId: 1 },
+    { id:  8, title: '開発',   start:  840, end: 1080, col: 0, groupId: 1 },
+    { id:  9, title: '3コマ',  start:  840, end:  930, col: 0, groupId: 1 },
+    { id: 10, title: 'MTG',    start:  930, end:  960, col: 0, groupId: 1 },
+    { id: 11, title: '4コマ',  start:  990, end: 1080, col: 0, groupId: 1 },
+    { id: 12, title: '料理',   start: 1080, end: 1140, col: 0, groupId: 1 },
+    { id: 13, title: '夕食',   start: 1140, end: 1200, col: 0, groupId: 1 },
+    { id: 14, title: 'お風呂', start: 1200, end: 1260, col: 0, groupId: 1 },
+    { id: 15, title: '5コマ',  start: 1260, end: 1350, col: 0, groupId: 1 },
+    { id: 16, title: '睡眠',   start: 1380, end: 1620, col: 0, groupId: 1 },
   ]);
   let nextId = $state(17);
   let newTitle = $state('');
+  let newTaskGroupId = $state(1);
 
   let dragging = $state(null);
   let container = $state(null);
-  let cols = $state([...COLS]); // 動的に増減する列IDリスト
+  let cols = $state([...COLS]);
   let colRefs = $state(COLS.map(() => null));
   let stockContainer = $state(null);
   let stockDrag = $state(null);
   let tooltip = $state(null);
 
-  // 列幅リサイズ
-  let colWidths = $state(COLS.map(() => 1)); // flex値
-  let resizing = $state(null); // { dividerIndex, startX, leftWidth, rightWidth }
+  let colWidths = $state(COLS.map(() => 1));
+  let resizing = $state(null);
   let wrapperRef = $state(null);
+
+  function getGroupColor(groupId) {
+    return stockGroups.find(g => g.id === groupId)?.color ?? '#A6B5A5';
+  }
+
+  function addGroup() {
+    const usedColors = stockGroups.map(g => g.color);
+    const color = PRESET_COLORS.find(c => !usedColors.includes(c)) ?? PRESET_COLORS[0];
+    stockGroups = [...stockGroups, { id: nextGroupId++, name: 'グループ', color }];
+  }
+
+  function removeGroup(groupId) {
+    if (stockGroups.length <= 1) return;
+    const fallback = stockGroups.find(g => g.id !== groupId).id;
+    stock = stock.map(s => s.groupId === groupId ? { ...s, groupId: fallback } : s);
+    tasks = tasks.map(t => t.groupId === groupId ? { ...t, groupId: fallback } : t);
+    stockGroups = stockGroups.filter(g => g.id !== groupId);
+    if (newTaskGroupId === groupId) newTaskGroupId = fallback;
+  }
 
   function addCol() {
     const newColId = Math.max(...cols) + 1;
@@ -90,9 +121,8 @@
   function removeCol() {
     if (cols.length <= 1) return;
     const removedCol = cols[cols.length - 1];
-    // 削除列のタスクをストックへ
     const removed = tasks.filter(t => t.col === removedCol);
-    stock = [...stock, ...removed.map(t => ({ id: t.id, title: t.title }))];
+    stock = [...stock, ...removed.map(t => ({ id: t.id, title: t.title, groupId: t.groupId }))];
     tasks = tasks.filter(t => t.col !== removedCol);
     cols = cols.slice(0, -1);
     colRefs = colRefs.slice(0, -1);
@@ -116,7 +146,6 @@
   let nowMin = $state(getNowMin());
   setInterval(() => { nowMin = getNowMin(); }, 60000);
 
-  // タイムライン内ドラッグ
   function onTaskMousedown(e, task) {
     e.preventDefault();
     tooltip = null;
@@ -135,22 +164,25 @@
 
   function onStockMousedown(e, item) {
     e.preventDefault();
-    stockDrag = { id: item.id, title: item.title, ghostX: e.clientX, ghostY: e.clientY };
+    stockDrag = {
+      id: item.id, title: item.title, groupId: item.groupId,
+      color: getGroupColor(item.groupId),
+      ghostX: e.clientX, ghostY: e.clientY,
+    };
   }
 
   function returnToStock(e, task) {
     e.stopPropagation();
     tooltip = null;
     tasks = tasks.filter(t => t.id !== task.id);
-    stock = [...stock, { id: task.id, title: task.title }];
+    stock = [...stock, { id: task.id, title: task.title, groupId: task.groupId }];
   }
 
   function onMousemove(e) {
     if (resizing) {
       const totalWidth = colWidths.reduce((a, b) => a + b, 0);
       const wrapperRect = wrapperRef.getBoundingClientRect();
-      // hour-labels(48px) + dividers(1px each) を除いた実幅
-      const availableWidth = wrapperRect.width - 48 - (COLS.length - 1);
+      const availableWidth = wrapperRect.width - 48 - (cols.length - 1) * 5;
       const dx = e.clientX - resizing.startX;
       const dFlex = dx / availableWidth * totalWidth;
       const newLeft = Math.max(0.1, resizing.leftWidth + dFlex);
@@ -169,7 +201,6 @@
     const colEl = colRefs[dragging.col];
     const rect = colEl.getBoundingClientRect();
     const y = e.clientY - rect.top;
-
     tasks = tasks.map((t) => {
       if (t.id !== dragging.id) return t;
       if (dragging.type === 'move') {
@@ -190,15 +221,10 @@
   }
 
   function onMouseup(e) {
-    if (resizing) {
-      resizing = null;
-      return;
-    }
+    if (resizing) { resizing = null; return; }
     if (stockDrag) {
-      const x = e.clientX;
-      const y = e.clientY;
+      const x = e.clientX, y = e.clientY;
       let dropped = false;
-
       for (const side of cols) {
         const colEl = colRefs[side];
         if (!colEl) continue;
@@ -207,21 +233,18 @@
           const relY = y - rect.top;
           const start = snap(Math.max(DAY_START, DAY_START + pxToMin(relY - minToPx(30))));
           const end = Math.min(start + 60, DAY_END);
-          tasks = [...tasks, { id: stockDrag.id, title: stockDrag.title, col: side, start, end }];
+          tasks = [...tasks, { id: stockDrag.id, title: stockDrag.title, groupId: stockDrag.groupId, col: side, start, end }];
           stock = stock.filter(s => s.id !== stockDrag.id);
           dropped = true;
           break;
         }
       }
-
       if (!dropped && !stock.find(s => s.id === stockDrag.id)) {
-        stock = [...stock, { id: stockDrag.id, title: stockDrag.title }];
+        stock = [...stock, { id: stockDrag.id, title: stockDrag.title, groupId: stockDrag.groupId }];
       }
       stockDrag = null;
       return;
     }
-
-    // タイムライン内ドラッグ終了時、列をまたいでいたら col を更新
     if (dragging && dragging.type === 'move') {
       const x = e.clientX;
       for (const side of cols) {
@@ -237,7 +260,6 @@
     dragging = null;
   }
 
-  // ツールチップ
   function onTaskMouseenter(e, task) {
     if (dragging || stockDrag) return;
     const colEl = colRefs[task.col];
@@ -262,7 +284,7 @@
   function addTask() {
     const title = newTitle.trim();
     if (!title) return;
-    stock = [...stock, { id: nextId++, title }];
+    stock = [...stock, { id: nextId++, title, groupId: newTaskGroupId }];
     newTitle = '';
   }
 
@@ -276,7 +298,7 @@
 <svelte:window onmousemove={onMousemove} onmouseup={onMouseup} />
 
 {#if stockDrag}
-  <div class="ghost" style="left: {stockDrag.ghostX + 8}px; top: {stockDrag.ghostY - 16}px;">
+  <div class="ghost" style="left: {stockDrag.ghostX + 8}px; top: {stockDrag.ghostY - 16}px; background: {stockDrag.color};">
     {stockDrag.title}
   </div>
 {/if}
@@ -291,22 +313,51 @@
   </div>
   <div class="layout">
 
-    <!-- ストック -->
+    <!-- ストックパネル -->
     <div class="stock-panel" bind:this={stockContainer}>
-      <div class="stock-label">ストック</div>
-      <div class="stock-list">
-        {#each stock as item (item.id)}
-          <div class="stock-item" onmousedown={(e) => onStockMousedown(e, item)}>
-            {item.title}
+      {#each stockGroups as group (group.id)}
+        <div class="stock-group">
+          <div class="stock-group-header">
+            <div class="group-color-dot" style="background: {group.color}"></div>
+            <input
+              class="group-name-input"
+              value={group.name}
+              oninput={(e) => { stockGroups = stockGroups.map(g => g.id === group.id ? { ...g, name: e.target.value } : g); }}
+            />
+            {#if stockGroups.length > 1}
+              <button class="group-remove-btn" onclick={() => removeGroup(group.id)}>×</button>
+            {/if}
+            <div class="color-swatches">
+              {#each PRESET_COLORS as c}
+                <button
+                  class="swatch"
+                  class:active={group.color === c}
+                  style="background: {c};"
+                  onclick={() => { stockGroups = stockGroups.map(g => g.id === group.id ? { ...g, color: c } : g); }}
+                ></button>
+              {/each}
+            </div>
           </div>
-        {/each}
-        {#if stock.length === 0}
-          <div class="stock-empty">空</div>
-        {/if}
-      </div>
+          <div class="stock-list">
+            {#each stock.filter(s => s.groupId === group.id) as item (item.id)}
+              <div
+                class="stock-item"
+                style="background: {group.color};"
+                onmousedown={(e) => onStockMousedown(e, item)}
+              >
+                {item.title}
+              </div>
+            {/each}
+            {#if stock.filter(s => s.groupId === group.id).length === 0}
+              <div class="stock-empty">空</div>
+            {/if}
+          </div>
+        </div>
+      {/each}
+      <button class="add-group-btn" onclick={addGroup}>＋ グループ</button>
     </div>
 
-    <!-- タイムライン（左右2列） -->
+    <!-- タイムライン -->
     <div class="wrapper" bind:this={wrapperRef}>
       <div class="hour-labels">
         {#each hours as h}
@@ -334,7 +385,7 @@
           {#each layoutTasks().filter(t => t.col === col) as task (task.id)}
             <div
               class="task"
-              style="top: {minToPx(task.start - DAY_START)}px; height: calc({minToPx(task.end - task.start)}px - 3px); left: calc(4px + {task.subCol / task.totalSubCols * 100}%); right: calc(4px + {(task.totalSubCols - task.subCol - 1) / task.totalSubCols * 100}%);"
+              style="top: {minToPx(task.start - DAY_START)}px; height: calc({minToPx(task.end - task.start)}px - 3px); left: calc(4px + {task.subCol / task.totalSubCols * 100}%); right: calc(4px + {(task.totalSubCols - task.subCol - 1) / task.totalSubCols * 100}%); background: {getGroupColor(task.groupId)};"
               data-size={task.end - task.start <= 30 ? 'xs' : task.end - task.start <= 45 ? 'sm' : 'md'}
               onmousedown={(e) => onTaskMousedown(e, task)}
               onmouseenter={(e) => onTaskMouseenter(e, task)}
@@ -363,6 +414,11 @@
   </div>
 
   <div class="add-form">
+    <select class="group-select" bind:value={newTaskGroupId}>
+      {#each stockGroups as group}
+        <option value={group.id}>{group.name}</option>
+      {/each}
+    </select>
     <input type="text" placeholder="タスク名を入力" bind:value={newTitle} onkeydown={onFormKeydown} />
     <button class="add-btn" onclick={addTask}>追加</button>
   </div>
@@ -387,16 +443,9 @@
     margin-bottom: 16px;
   }
 
-  h1 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #262724;
-  }
+  h1 { font-size: 18px; font-weight: 600; color: #262724; }
 
-  .col-btns {
-    display: flex;
-    gap: 4px;
-  }
+  .col-btns { display: flex; gap: 4px; }
 
   .col-btn {
     padding: 4px 10px;
@@ -412,42 +461,95 @@
   .col-btn:hover { background: #ede5d8; }
   .col-btn:disabled { opacity: 0.35; cursor: default; }
 
-  .layout {
+  .layout { display: flex; gap: 12px; align-items: flex-start; }
+
+  /* ストックパネル */
+  .stock-panel {
+    width: 160px;
+    flex-shrink: 0;
     display: flex;
-    gap: 12px;
-    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 
-  /* ストック */
-  .stock-panel {
-    width: 120px;
-    flex-shrink: 0;
+  .stock-group {
     border: 1px solid #c8bfb0;
     border-radius: 8px;
     background: #fdf8f2;
     overflow: hidden;
   }
 
-  .stock-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: #8a8278;
-    padding: 7px 10px 5px;
+  .stock-group-header {
+    padding: 6px 8px 5px;
     border-bottom: 1px solid #e0d8cc;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
   }
+
+  .group-color-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .group-name-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #262724;
+    background: none;
+    border: none;
+    outline: none;
+    padding: 0;
+  }
+
+  .group-remove-btn {
+    background: none;
+    border: none;
+    color: #b0a898;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0 1px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .group-remove-btn:hover { color: #262724; }
+
+  .color-swatches {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    width: 100%;
+    padding-top: 2px;
+  }
+
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(38,39,36,0.15);
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .swatch.active { border: 2px solid #262724; }
+  .swatch:hover { opacity: 0.8; }
 
   .stock-list {
     padding: 6px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-height: 48px;
+    min-height: 32px;
   }
 
   .stock-item {
-    background: #A6B5A5;
     color: #262724;
     font-size: 12px;
     font-weight: 600;
@@ -466,13 +568,26 @@
     font-size: 10px;
     color: #c0b8b0;
     text-align: center;
-    padding: 10px 4px;
+    padding: 6px 4px;
   }
+
+  .add-group-btn {
+    padding: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #fdf8f2;
+    color: #8a8278;
+    border: 1px dashed #c8bfb0;
+    border-radius: 6px;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  .add-group-btn:hover { background: #ede5d8; color: #262724; }
 
   /* ゴースト */
   .ghost {
     position: fixed;
-    background: #A6B5A5;
     color: #262724;
     font-size: 13px;
     font-weight: 600;
@@ -547,9 +662,7 @@
     transition: background 0.15s;
   }
 
-  .col-divider:hover, .col-divider.resizing {
-    background: #A6B5A5;
-  }
+  .col-divider:hover, .col-divider.resizing { background: #A6B5A5; }
 
   .night-overlay {
     position: absolute;
@@ -592,7 +705,6 @@
   .task {
     position: absolute;
     left: 4px; right: 4px;
-    background: #A6B5A5;
     border-radius: 6px;
     padding: 6px 8px;
     cursor: grab;
@@ -678,6 +790,17 @@
     gap: 8px;
     margin-top: 12px;
     align-items: center;
+  }
+
+  .group-select {
+    padding: 8px;
+    font-size: 13px;
+    border: 1px solid #c8bfb0;
+    border-radius: 6px;
+    background: #fdf8f2;
+    color: #262724;
+    outline: none;
+    cursor: pointer;
   }
 
   .add-form input {
